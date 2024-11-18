@@ -1,0 +1,150 @@
+#!/bin/bash
+
+##########################################################################
+#Script Name	: docker-tags
+#Description	: A Bash script to fetch and display tags of a Docker 
+#		  image repository from Docker Hub or a custom registry.
+#Author       	: Ata Mahmoudi
+#Email         	: ata@linux.com
+##########################################################################
+
+
+# Function to check and install jq
+install_jq() {
+  if ! command -v jq &> /dev/null; then
+    echo "jq is not installed. Attempting to install it..."
+    
+    if [ -f /etc/os-release ]; then
+      source /etc/os-release
+      case "$ID" in
+        ubuntu|debian)
+          sudo apt update && sudo apt install -y jq
+          ;;
+        centos|fedora|rhel)
+          sudo yum install -y jq || sudo dnf install -y jq
+          ;;
+        arch)
+          sudo pacman -S --noconfirm jq
+          ;;
+        *)
+          echo "Unsupported Linux distribution. Please install jq manually."
+          exit 1
+          ;;
+      esac
+    elif [ "$(uname)" == "Darwin" ]; then
+      brew install jq
+    else
+      echo "Unsupported operating system. Please install jq manually."
+      exit 1
+    fi
+  fi
+}
+
+# Default values
+DEFAULT_REGISTRY="https://hub.docker.com/v2"
+DEFAULT_PAGE_SIZE=100
+OFFICIAL=0
+RAW=0
+
+# Check for jq
+install_jq
+
+# Parse options
+while getopts "or" opt; do
+  case "$opt" in
+    o) OFFICIAL=1 ;;
+    r) RAW=1 ;;
+    *) echo "Invalid option: -$OPTARG"; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# Get input parameters
+REPO_NAME=$1
+REGISTRY_URL=${2:-$DEFAULT_REGISTRY}
+PAGE_SIZE=${3:-$DEFAULT_PAGE_SIZE}
+
+# Validate repository name
+if [ -z "$REPO_NAME" ]; then
+  echo "Usage: $0 [-o] [-r] <repository_name> [registry_url] [page_size]"
+  echo "  -o: Indicate the repository is an official image (prepends 'library/' to the name)"
+  echo "  -r: Output the full raw API response for each page"
+  exit 1
+fi
+
+# Prepend 'library/' for official repositories
+if [ $OFFICIAL -eq 1 ]; then
+  REPO_NAME="library/$REPO_NAME"
+fi
+
+PAGE=1
+TAGS=()
+
+# Fetch tags from the registry API
+echo "Fetching tags for repository: $REPO_NAME"
+echo "Using registry: $REGISTRY_URL"
+echo "Page size: $PAGE_SIZE"
+
+while true; do
+  RESPONSE=$(curl -s "${REGISTRY_URL}/repositories/${REPO_NAME}/tags/?page=${PAGE}&page_size=${PAGE_SIZE}")
+  if [ $? -ne 0 ]; then
+    echo "Error fetching tags from registry API"
+    exit 2
+  fi
+
+  # Output raw response if -r is passed
+  if [ $RAW -eq 1 ]; then
+    echo "$RESPONSE" | jq
+    NEXT_PAGE=$(echo "$RESPONSE" | jq -r '.next')
+    if [ "$NEXT_PAGE" == "null" ]; then
+      break
+    fi
+    ((PAGE++))
+    continue
+  fi
+
+
+  # Parse tags from the results array
+  TAGS_PAGE=$(echo "$RESPONSE" | jq -r '.results[]?.name')
+
+  if [ -z "$TAGS_PAGE" ]; then
+    break
+  fi
+
+  TAGS+=($TAGS_PAGE)
+
+  # Check if there's a next page
+  NEXT_PAGE=$(echo "$RESPONSE" | jq -r '.next')
+  if [ "$NEXT_PAGE" == "null" ]; then
+    break
+  fi
+
+  ((PAGE++))
+done
+
+
+# Skip tag listing if -r is passed
+if [ $RAW -eq 1 ]; then
+  exit 0
+fi
+
+
+# Check if no tags were found
+if [ ${#TAGS[@]} -eq 0 ]; then
+  echo "No tags found for repository: $REPO_NAME"
+  exit 4
+fi
+
+# Output tags
+echo "Tags for $REPO_NAME:"
+for TAG in "${TAGS[@]}"; do
+  echo "$TAG"
+done
+
+# Output total tag count
+TAG_COUNT=${#TAGS[@]}
+echo
+echo "Total number of tags: $TAG_COUNT"
+
+
+
