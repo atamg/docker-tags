@@ -65,7 +65,7 @@ A Bash script to fetch and display tags of a Docker image repository from Docker
 
 ## Author
 
-- Ata Mahmoudi [@atamq](https://www.github.com/atamq)
+- Ata Mahmoudi [@atamg](https://www.github.com/atamq)
 
 
 ## License
